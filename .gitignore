@@ -1,0 +1,12 @@
+# Ignore python virtual environments
+venv/
+__pycache__/
+*.pyc
+
+# Ignore node modules from React frontend
+node_modules/
+dist/
+
+# CRITICAL: Ignore local configuration files holding secret API keys
+.env
+uploaded_data.csv
