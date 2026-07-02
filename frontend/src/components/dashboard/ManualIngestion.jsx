@@ -7,6 +7,9 @@ export default function ManualIngestion({ isScanning, onToggleScan }) {
   const [isUploading, setIsUploading] = useState(false);
   const [statusMsg, setStatusMsg] = useState("");
   const fileInputRef = useRef(null);
+  
+  // We use a ref to track if we should stop the loop when "Halt" is clicked
+  const isScanningRef = useRef(isScanning);
 
   const handleDragOver = (e) => {
     e.preventDefault();
@@ -21,49 +24,87 @@ export default function ManualIngestion({ isScanning, onToggleScan }) {
     e.preventDefault();
     setIsDragOver(false);
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      setSelectedFile(e.dataTransfer.files[0]);
-      uploadFile(e.dataTransfer.files[0]);
+      loadFileLocally(e.dataTransfer.files[0]);
     }
   };
 
   const handleFileSelect = (e) => {
     if (e.target.files && e.target.files.length > 0) {
-      setSelectedFile(e.target.files[0]);
-      uploadFile(e.target.files[0]);
+      loadFileLocally(e.target.files[0]);
     }
   };
 
-  const uploadFile = async (file) => {
+  // V2 ARCHITECTURE: We no longer upload the file to the backend.
+  // We load it into the browser's memory so the Browser can act as the edge simulator!
+  const loadFileLocally = (file) => {
     if (!file.name.endsWith('.csv')) {
       setStatusMsg("❌ Error: Please upload a valid .csv file.");
       return;
     }
-
-    setIsUploading(true);
-    setStatusMsg("⏳ Uploading to Secure Backend...");
-
-    const formData = new FormData();
-    formData.append('file', file);
-
-    try {
-      const response = await fetch('http://localhost:5000/api/upload', {
-        method: 'POST',
-        body: formData,
-      });
-      
-      const data = await response.json();
-
-      if (response.ok) {
-        setStatusMsg("✅ " + data.message);
-      } else {
-        setStatusMsg("❌ Upload failed: " + data.error);
-      }
-    } catch (error) {
-      setStatusMsg("❌ Server connection error.");
-    }
-    
-    setIsUploading(false);
+    setSelectedFile(file);
+    setStatusMsg("✅ File securely loaded into Browser Engine! Ready to scan.");
     setTimeout(() => setStatusMsg(""), 4000);
+  };
+
+  // This function acts like your traffic_simulator.py, but runs right in React!
+  const startStreamSimulation = async () => {
+    if (!selectedFile) return;
+    
+    setIsUploading(true);
+    setStatusMsg("⚡ Streaming packets to Ingestion Gateway...");
+
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      const text = e.target.result;
+      const rows = text.split('\n');
+      
+      // Loop through the CSV rows (starting at 1 to skip the header)
+      for (let i = 1; i < rows.length; i++) {
+        // If the user clicks "Halt System Scan", break the loop!
+        if (!isScanningRef.current) {
+          setStatusMsg("🛑 Scan Halted by User.");
+          setIsUploading(false);
+          break;
+        }
+
+        const cols = rows[i].split(',');
+        if (cols.length < 5) continue; // Skip empty rows
+
+        try {
+          // Map the CSV data exactly like we did in Python
+          const payload = {
+            source_ip: "192.168.1." + Math.floor(Math.random() * 255),
+            destination_ip: "10.0.0.5",
+            packet_size: parseFloat(cols[4]) ? parseInt(cols[4]) : 500,
+            protocol: cols[1] || "tcp",
+            src_bytes: parseFloat(cols[2]) ? parseInt(cols[2]) : 0,
+            dst_bytes: parseFloat(cols[3]) ? parseInt(cols[3]) : 0,
+            raw_data: cols // <--- ADD THIS: Send the entire row!
+          };
+
+          // Blast the packet to the FastAPI Ingestion Server
+          await fetch('http://127.0.0.1:8000/ingest', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+
+          // Wait 500ms before sending the next one to simulate a real-time stream
+          await new Promise(resolve => setTimeout(resolve, 500));
+          
+        } catch (error) {
+          console.error("Failed to send packet", error);
+        }
+      }
+      
+      if (isScanningRef.current) {
+         setStatusMsg("✅ Scan Complete. All packets ingested.");
+         onToggleScan(); // Turn off radar
+      }
+      setIsUploading(false);
+    };
+    
+    reader.readAsText(selectedFile);
   };
 
   return (
@@ -88,13 +129,13 @@ export default function ManualIngestion({ isScanning, onToggleScan }) {
           <span className={`material-symbols-outlined transition-colors ${isDragOver ? 'text-primary' : 'text-on-surface-variant group-hover:text-primary'}`}>{isUploading ? 'sync' : 'upload'}</span>
         </div>
         <h5 className="font-body-md font-bold mb-1">
-          {isUploading ? 'Encrypting & Uploading...' : 'Upload Test_data.csv'}
+          {isUploading ? 'Streaming to Server...' : 'Upload Test_data.csv'}
         </h5>
         <p className="text-on-surface-variant text-sm text-center mb-6">
           {statusMsg ? (
             <span className={statusMsg.includes('✅') ? 'text-primary' : 'text-error'}>{statusMsg}</span>
           ) : (
-            'Drag and drop or click to upload raw packet logs.'
+            'Drag and drop or click to load raw packet logs.'
           )}
         </p>
         
@@ -120,19 +161,24 @@ export default function ManualIngestion({ isScanning, onToggleScan }) {
         />
       </div>
       
-      {/* UPDATE: The Button now triggers onToggleScan and changes color/text! */}
       <button 
         className={`mt-6 w-full py-4 rounded-lg font-bold uppercase tracking-[0.2em] transition-transform ${
           !selectedFile 
             ? 'bg-surface-variant text-on-surface-variant cursor-not-allowed opacity-50'
             : isScanning 
-              ? 'bg-error text-background neon-glow-error active:scale-95' // Red when scanning to stop
-              : 'bg-primary-container text-on-primary neon-glow-primary active:scale-95' // Green when ready to start
+              ? 'bg-error text-background neon-glow-error active:scale-95'
+              : 'bg-primary-container text-on-primary neon-glow-primary active:scale-95'
         }`}
         disabled={!selectedFile}
         onClick={() => {
           if (selectedFile) {
-            onToggleScan(); // Send the command back up to LiveRadar!
+            const newScanState = !isScanning;
+            isScanningRef.current = newScanState; // Update ref immediately for the loop
+            onToggleScan(); // Trigger parent UI changes
+            
+            if (newScanState) {
+              startStreamSimulation(); // Start blasting data!
+            }
           }
         }}
       >

@@ -1,67 +1,61 @@
-import React, { useState, useEffect } from 'react';
+import { useState } from 'react';
 import StatCard from '../components/dashboard/StatCard';
 import ThreatRadar from '../components/dashboard/ThreatRadar';
 import ManualIngestion from '../components/dashboard/ManualIngestion';
 import LiveConsole from '../components/dashboard/LiveConsole';
+import { useSupabaseListener } from '../hooks/useSupabaseListener';
+
 
 export default function LiveRadar() {
-  // Master States
-  const [metrics, setMetrics] = useState({ total_scanned: 0, active_threats: 0, model_accuracy: 98.4 });
-  const [logs, setLogs] = useState([{ id: 'sys1', text: '[SYS] Kernel Initialization Complete. Waiting for manual ingestion...', type: 'sys' }]);
-  const [radarPoints, setRadarPoints] = useState([]);
+  // 🔴 THE NEW MASTER HOOK: Plugs directly into Supabase WebSockets!
+  // This replaces all your old local state and fetch() polling
+  const { logs: rawLogs, metrics: rawMetrics } = useSupabaseListener();
   
-  // 🔴 THIS IS THE MASTER SWITCH! It starts as FALSE so the scanner waits for you.
+  // We still keep this switch to control the ManualIngestion component
   const [isScanning, setIsScanning] = useState(false);
-
-  useEffect(() => {
-    let scanInterval;
-
-    // 🔴 ONLY start polling the backend if isScanning is TRUE
-    if (isScanning) {
-      scanInterval = setInterval(async () => {
-        try {
-          const response = await fetch('http://localhost:5000/api/scan-next');
-          const data = await response.json();
-
-          if (data.error) return;
-
-          setMetrics(data.metrics);
-
-          const isBlocked = data.status === 'BLOCKED';
-          const newLog = {
-            id: data.packet_id + '-' + Date.now(),
-            text: `[NET] ${data.timestamp} Packet #${data.packet_id} - ${data.protocol} - Confidence: ${data.confidence.toFixed(1)}% - ${data.status}`,
-            type: isBlocked ? 'error' : 'normal'
-          };
-          
-          setLogs(prevLogs => [...prevLogs, newLog].slice(-50));
-
-          setRadarPoints(prevPoints => {
-            const nextPoints = [...prevPoints, { confidence: data.confidence, status: data.status }];
-            return nextPoints.slice(-20);
-          });
-
-        } catch (error) {
-          console.error("Connection matrix disconnected from server backend:", error);
-          setIsScanning(false); // Auto-stop if server crashes
-        }
-      }, 2000);
-    }
-
-    // Cleanup interval on stop
-    return () => {
-      if (scanInterval) clearInterval(scanInterval);
-    };
-  }, [isScanning]); // React re-runs this whenever you click the button!
 
   // The function the button will call to flip the switch
   const toggleScan = () => {
     setIsScanning(!isScanning);
   };
 
+  // ==========================================
+  // DATA ADAPTERS 
+  // We format the raw DB rows into the shapes your UI components expect
+  // ==========================================
+
+  // 1. Format Metrics
+  const metrics = {
+    total_scanned: rawMetrics?.totalScanned || 0,
+    active_threats: rawMetrics?.activeThreats || 0,
+    model_accuracy: 98.4 // Static for now, can be updated later
+  };
+
+  // 2. Format Logs for the LiveConsole
+  let formattedLogs = rawLogs.map(log => {
+    const time = new Date(log.timestamp).toLocaleTimeString();
+    return {
+      id: log.id,
+      text: `[NET] ${time} Packet - IP: ${log.source_ip} - ${log.protocol.toUpperCase()} - ${log.is_intrusion ? 'BLOCKED' : 'ALLOWED'}`,
+      type: log.is_intrusion ? 'error' : 'normal'
+    };
+  });
+
+  // Default system init log if DB is completely empty
+  if (formattedLogs.length === 0) {
+    formattedLogs = [{ id: 'sys1', text: '[SYS] Kernel Initialization Complete. Waiting for manual ingestion...', type: 'sys' }];
+  }
+
+  // 3. Format Radar Points (Mocking a confidence score based on the boolean)
+  const radarPoints = rawLogs.slice(0, 20).map(log => ({
+    // If intrusion, confidence is 90-99%. If normal, confidence is 10-25%
+    confidence: log.is_intrusion ? 90 + Math.random() * 9 : 10 + Math.random() * 15,
+    status: log.is_intrusion ? 'BLOCKED' : 'ALLOWED'
+  })).reverse(); // Reversing so newest points enter the radar correctly
+
   return (
-    <div className="space-y-gutter">
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-gutter">
+    <div className="space-y-4 p-6 bg-gray-950 min-h-screen">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <StatCard 
           icon="inventory_2"
           title="Total Packets Scanned"
@@ -90,10 +84,10 @@ export default function LiveRadar() {
 
       <ThreatRadar dataPoints={radarPoints} />
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-gutter pb-8">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 pb-8">
         {/* 🔴 WE PASS THE REMOTE CONTROL TO THE BUTTON HERE */}
         <ManualIngestion isScanning={isScanning} onToggleScan={toggleScan} />
-        <LiveConsole incomingLogs={logs} />
+        <LiveConsole incomingLogs={formattedLogs} />
       </div>
     </div>
   );
