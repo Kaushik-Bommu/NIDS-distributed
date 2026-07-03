@@ -99,11 +99,15 @@ async def run_prediction(log: NetworkLog):
             print(f"✅ Normal Traffic from IP {log.source_ip}")
 
         # STEP 3: Save to Supabase
+        # STEP 3: Save to Supabase
         supabase.table('network_intrusions').insert({
             "source_ip": log.source_ip,
             "destination_ip": log.destination_ip,
             "packet_size": log.packet_size,
             "protocol": log.protocol,
+            "src_bytes": log.src_bytes,       # <-- NEW
+            "dst_bytes": log.dst_bytes,       # <-- NEW
+            "raw_data": log.raw_data,         # <-- NEW (Supabase handles the JSONB conversion)
             "is_intrusion": is_intrusion
         }).execute()
         print("💾 Successfully saved log to Supabase!")

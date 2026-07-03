@@ -83,7 +83,7 @@ export default function ManualIngestion({ isScanning, onToggleScan }) {
           };
 
           // Blast the packet to the FastAPI Ingestion Server
-          await fetch('http://127.0.0.1:8000/ingest', {
+          await fetch('https://kaushikbommu-sentinel-ingestion-api.hf.space/ingest', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)

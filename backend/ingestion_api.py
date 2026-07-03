@@ -54,16 +54,21 @@ class NetworkLog(BaseModel):
 # --- ENDPOINT: Fast-lane ingestion, no heavy ML processing here ---
 @app.post("/ingest", status_code=status.HTTP_202_ACCEPTED)
 async def ingest_log(log: NetworkLog):
+    # This will print locally so you can verify the URL doesn't say 'localhost' or have spaces
+    print(f"⚡ Routing packet to: '{ML_WORKER_URL}'")
+    
     try:
-        # Pushes the JSON data to QStash. QStash will then securely route it 
-        # to your ML Worker via the ML_WORKER_URL.
-        client.message.enqueue_json(
-            queue=QUEUE_NAME,
+        client.message.publish_json(
+            # queue=QUEUE_NAME,
             url=ML_WORKER_URL,
-            body=log.model_dump() # Converts the Pydantic model to a standard dictionary
+            headers={
+                # ADDED THE REQUIRED QSTASH PREFIX:
+                "Upstash-Forward-ngrok-skip-browser-warning": "true" 
+            },
+            body=log.model_dump()
         )
         return {"status": "Log successfully queued in QStash"}
         
     except Exception as e:
-        # If QStash fails, return a 500 Internal Server Error
+        print(f"❌ QStash Error: {str(e)}") 
         raise HTTPException(status_code=500, detail=str(e))

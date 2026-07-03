@@ -24,19 +24,27 @@ export default function LiveRadar() {
   // We format the raw DB rows into the shapes your UI components expect
   // ==========================================
 
+  const formatBytes = (bytes) => {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  };
   // 1. Format Metrics
   const metrics = {
     total_scanned: rawMetrics?.totalScanned || 0,
     active_threats: rawMetrics?.activeThreats || 0,
-    model_accuracy: 98.4 // Static for now, can be updated later
+    bandwidth: formatBytes(rawMetrics?.totalBytes || 0) 
   };
 
   // 2. Format Logs for the LiveConsole
   let formattedLogs = rawLogs.map(log => {
     const time = new Date(log.timestamp).toLocaleTimeString();
+    const byteString = `[↑${log.src_bytes}B ↓${log.dst_bytes}B]`;
     return {
       id: log.id,
-      text: `[NET] ${time} Packet - IP: ${log.source_ip} - ${log.protocol.toUpperCase()} - ${log.is_intrusion ? 'BLOCKED' : 'ALLOWED'}`,
+      text: `[NET] ${time} Packet - IP: ${log.source_ip} - ${log.protocol.toUpperCase()} ${byteString} - ${log.is_intrusion ? 'BLOCKED' : 'ALLOWED'}`,  
       type: log.is_intrusion ? 'error' : 'normal'
     };
   });
@@ -73,11 +81,11 @@ export default function LiveRadar() {
           variant={metrics.active_threats > 0 ? "error" : "primary"}
         />
         <StatCard 
-          icon="verified_user"
-          title="Model Accuracy"
-          value={`${metrics.model_accuracy}%`}
-          trendIcon="check_circle"
-          trendText="Sentinel-V3 Engine Active"
+          icon="router"
+          title="Bandwidth Analyzed"
+          value={metrics.bandwidth}
+          trendIcon="swap_vert"
+          trendText="Live Payload Telemetry"
           variant="secondary"
         />
       </div>

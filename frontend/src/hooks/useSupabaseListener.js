@@ -17,10 +17,9 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 export function useSupabaseListener() {
   const [logs, setLogs] = useState([]);
-  const [metrics, setMetrics] = useState({ totalScanned: 0, activeThreats: 0 });
+  const [metrics, setMetrics] = useState({ totalScanned: 0, activeThreats: 0, totalBytes: 0 });
 
   useEffect(() => {
-    // 1. Fetch the last 50 logs when the page loads
     const fetchInitialData = async () => {
       const { data } = await supabase
         .from('network_intrusions')
@@ -28,12 +27,15 @@ export function useSupabaseListener() {
         .order('timestamp', { ascending: false })
         .limit(50);
       
-      if (data) setLogs(data);
+      if (data) {
+        setLogs(data);
+        // Calculate initial bandwidth from the first 50 logs
+        const initialBytes = data.reduce((acc, log) => acc + (log.src_bytes || 0) + (log.dst_bytes || 0), 0);
+        setMetrics(prev => ({ ...prev, totalBytes: initialBytes }));
+      }
     };
     fetchInitialData();
 
-    // 2. Subscribe to REAL-TIME inserts!
-    // This replaces your old setInterval('/api/scan-next')
     const channel = supabase
       .channel('schema-db-changes')
       .on(
@@ -41,15 +43,14 @@ export function useSupabaseListener() {
         { event: 'INSERT', schema: 'public', table: 'network_intrusions' },
         (payload) => {
           const newLog = payload.new;
-          console.log("🚨 New packet arrived instantly!", newLog);
           
-          // Add the new log to the top of the UI list
           setLogs((prevLogs) => [newLog, ...prevLogs].slice(0, 50));
           
-          // Update your dashboard metrics instantly
+          // 2. UPDATE the metrics dynamically with the new byte columns!
           setMetrics((prev) => ({
             totalScanned: prev.totalScanned + 1,
-            activeThreats: newLog.is_intrusion ? prev.activeThreats + 1 : prev.activeThreats
+            activeThreats: newLog.is_intrusion ? prev.activeThreats + 1 : prev.activeThreats,
+            totalBytes: prev.totalBytes + (newLog.src_bytes || 0) + (newLog.dst_bytes || 0)
           }));
         }
       )
